@@ -1,0 +1,215 @@
+import uk.ac.warwick.dcs.maze.logic.IRobot;
+/*
+This code works by determining the type of tile the robot is on, and acting accordingly.
+It knows to always backtrack at deadends and go where you weren't just at at corridors and corners.
+At intersections, the robot tries to go places it hasn't been before, randomly picking a direction it hasn't gone if it can.
+It uses an instantiation of the RobotData class to store data about the maze.
+When the robot encounters a new intersection, it stores it in the class, with the direction it was first accessed from, creating a path back to the start tile.
+If the robot encounters a previously explored intersection, it backtracks along this path so that it can find an unexplored intersection.
+The robot only starts backtracking when it has doubled back on itself. Otherwise, at explored intersetions, it doubles back on itself.
+When the robot is backtracking, it stops backtracking when it reaches a new tile.
+
+Choices:
+I added to the initial if statement that initialises the RobotData class to behave differently at the start tile, so that the robot wouldn't have to check for the start tile on TurnBack
+I decided to not seperate the backtracking and normal explorer code into seperate functions, so that I can merge parts of them together if their functionality is the same
+I used a 2d array that stores Xpos, Ypos and arrived combined, so that I didn't need 3 seperate arrays to store them, and so that I don't have to loop through a list every time I want to check a junction
+I chose not to reset backtracking or checked on reset, since the robot will never be backtracking onto the finish and the finish will always be unchecked
+I chose not to 
+
+Error checking:
+Overflow error occured in large mazes due to maze size being 2n - 1 times the settings value. Fixed by increasing the size of the arrived list
+Robot exclusively went East if start was a corner. Made the robot face a random direction at start, which also allowed me to simplify the TurnBack function
+Error occured when running a maze with different Explorer classes, fixed by changing the names of the RobotData class between scripts
+*/
+public class Ex1
+{
+	private int pollRun = 0;   
+	private RobotData robotData;
+	private boolean checked = false;
+	private boolean backtracking = false;
+	private int i;
+	private int directions;
+	public void controlRobot(IRobot robot) 
+	{
+	    int possibleDirections = 0;
+	    int accessedDirections = 0;
+	    boolean thisChecked;
+	    
+	    //This half of the controlRobot tells the robot what to do on the first run, updates new junctions and updates variables
+	    
+	    if(pollRun == 0)
+	    {
+	      if ((robot.getRuns() == 0))
+	      {
+		robotData = new RobotData(); //reset the data store on the first move of the first run of a new maze
+	      }
+	      robot.setHeading(modifyHeading(optionSelect(robot))); //On the first run, sets the robot to a random direction that faces away from an open tile, so that the corridor and turnback functions can use it
+	    }
+	    
+	    possibleDirections = passageExits(robot);
+	    accessedDirections = beenBeforeExits(robot);
+	    thisChecked = checked; //Stores whether the robot moved onto an explored space from last space. If there was nowhere new to go last turn, it will have gone onto a checked tile. 
+	    checked = updateChecked(possibleDirections,accessedDirections);//Stores whether every possible direction from this tile has been accessed before
+	    
+	    if(possibleDirections >= 3 && !thisChecked)//Will add the location of this junction only if this is an unchecked junction
+	    {
+		/*if(robotData.CheckArrived(robot.getLocation().x,robot.getLocation().y) != 0)
+		{
+		  System.out.println("I've been here before");
+		}Error check to see if the robot is adding a new exit for a previously accessed tile*/
+	      robotData.addLocation(robot);
+	      robotData.incrementJcounter();
+	    }
+	    
+	    //This half of the controlRobot actually instructs the robot where to face
+	    
+	    if(possibleDirections == 2)//The check for two exits occurs first, so that the check for a deadend or an explored junction can be performed simultaneously
+	    {//Runs the corridor function at a corridor or corners
+	      corridor(robot);
+	    }
+	    else if(possibleDirections == 1 || (thisChecked && !backtracking))
+	    {//Always double back at a dead end, or when not backtracking into an explored location
+	      turnBack(robot);
+	    }
+	    else
+	    {
+	      if(!checked)
+	      {
+		robot.setHeading(optionSelect(robot));
+		backtracking = false;
+	      }
+	      else
+	      {
+		  robot.setHeading(modifyHeading(robotData.checkArrived(robot.getLocation().x,robot.getLocation().y)));
+	      }
+	    }
+	    pollRun++; // Increment pollRun so that the data is not reset each time the robot moves
+	    //System.out.println("\n On run " + pollRun + " Checked is " + checked);
+	}
+	//I arranged these functions in the order they are called
+	private int modifyHeading(int heading)
+	{//Takes a heading and flips it to its oposite
+	  return ((heading - IRobot.NORTH + 2) % 4 + IRobot.NORTH);
+	}
+	
+	public int optionSelect(IRobot robot)
+	{
+	  int randNo;
+	  do
+	  {//Keeps looping until the random direction does not point to a wall
+	    //Reuses the random direction code from Cw1
+	    randNo = (int) Math.round(Math.random() * 4);
+	    switch (randNo)
+	    {
+	      case(1):
+		robot.setHeading(IRobot.NORTH);
+		break;
+	      case(2):
+		robot.setHeading(IRobot.EAST);
+		break;
+	      case(3):
+		robot.setHeading(IRobot.SOUTH);
+		break;
+	      default:
+		robot.setHeading(IRobot.WEST);
+	    }
+	  } while(robot.look(IRobot.AHEAD) == IRobot.WALL || robot.look(IRobot.AHEAD) == IRobot.BEENBEFORE);
+	  return(robot.getHeading());//Int instead of void for when this value is needed to be modified
+	}
+	
+	public int passageExits(IRobot robot)
+	{
+	  directions = 0;
+	  for(i=IRobot.AHEAD;i<=IRobot.LEFT;i++)//Loops to find the nonwallexits, as I will need to be able to know where to go depending on the block
+	    {
+	      if(robot.look(i) != IRobot.WALL)
+	      {
+		directions ++;
+	      }
+	    }
+	    //System.out.println("There are " + directions +" unchecked directions");
+	  return directions;
+	}
+	
+	public int beenBeforeExits(IRobot robot)
+	{
+	  directions = 0;
+	  for(i=IRobot.AHEAD;i<=IRobot.LEFT;i++)//Similiar function as nonwallexits to find the beenbeforeexits
+	  {
+	    if(robot.look(i) == IRobot.BEENBEFORE)
+	    {
+	      directions ++;
+	    }
+	  }
+	  //System.out.println("There are " + directions +" explored directions");
+	  return directions;
+	}
+	
+	public boolean updateChecked(int possibleDirections, int accessedDirections)
+	{//Checks if there are any new exits to take by comparing the available directions with the ones that have been accessed before
+	  if(possibleDirections == accessedDirections)
+	  {
+	    return true;
+	  }
+	  else
+	  {
+	    return false;
+	  }
+	}
+	
+	public void turnBack(IRobot robot)
+	{
+	  //Makes the robot turn back, and makes backtracking true. It doesn't matter if backtracking is set to true on the start tile, as it will become false when it reaches any junction
+	    robot.face(IRobot.BEHIND);
+	    backtracking = true;
+	}
+	
+	public void corridor(IRobot robot)
+	{//The direction to go will either be left, right or forwards by default
+	  for(i=IRobot.RIGHT;i<=IRobot.LEFT;i+=2)
+	  {
+	    if(robot.look(i) != IRobot.WALL)
+	    {
+		robot.face(i);
+	    }
+	  }
+	}
+	
+	public void reset() 
+	{
+	  pollRun = 0;
+	  robotData.resetJunctions();
+	}
+}
+class RobotData
+{
+  private int[][] arrived = new int[399][399]; //Each array is stored within the junction's y coordinates' index of the junction's x coodinates' index. Bundles juncX, juncY and arrived, saving space
+  private static String[] heading_names = {"North","East","South","West"}; //A list to store the directions the robot can take
+  private int junctionCounter = 0;
+  public void resetJunctions() 
+  {
+    int i;
+    int j;
+    for(i = 0;i<399;i++)
+    {
+      for(j=0;j<399;j++)
+      {
+	arrived[i][j] = 0;
+      }
+    }
+    System.out.println("This many unique junctions were visited this run: " + junctionCounter);
+  }
+  public void incrementJcounter()
+  {
+    junctionCounter ++; //Junction counter will only ever be incremented, never set
+  }
+  public void addLocation(IRobot robot)
+  {
+    arrived[robot.getLocation().x-1][robot.getLocation().y-1] = robot.getHeading();
+    System.out.println("Junction (x = " + robot.getLocation().x + ", y = " + robot.getLocation().y + ") Heading " + heading_names[robot.getHeading() - IRobot.NORTH]);
+  }
+  public int checkArrived(int x_pos,int y_pos)
+  {
+    return arrived[x_pos-1][y_pos-1];
+  }
+}
