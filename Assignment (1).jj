@@ -1,0 +1,485 @@
+PARSER_BEGIN(Assignment)
+
+import java.util.*;
+import java.io.*;
+import java.io.FileReader;
+
+public class Assignment{
+
+    public static void main(String args []) throws ParseException
+    {
+      Assignment parser = new Assignment(System.in);
+      try
+      {
+        parser.functionList();
+      }
+      catch(Exception e) 
+      { //Character match failures are assumed to be any unspecific exception. In the parser/lexer, every time a valid token is entered, the next valid token is stored for use in this message.
+        System.out.println("FAIL");
+        System.err.println("On line: " + linenum);
+        System.err.println("Recieved symbol \"" + parser.getToken(1).toString() + "\". Expected " + Expected + ".");
+        System.exit(0);
+      }
+      System.out.println("PASS");
+      findDivergence(functioncontents.get(functiondefs.indexOf("MAIN")),new ArrayList<String>());
+      System.out.println(calculateValue(functioncontents.get(functiondefs.indexOf("MAIN")),0,0));
+    }
+
+    public static int linenum = 1;
+    public static String curVar; //Stores the variable defined by the current function so only it can be referenced.
+    public static String Expected = "\"DEF \"";
+    public static ArrayList<String> functiondefs = new ArrayList<String>(); //Stores all functions that have been defined. All functions share indexes with their relevant value in functioncontents.
+    public static ArrayList<String> functioncontents = new ArrayList<String>(); //Stores what a function does in a string form readable by the interpreter
+    public static ArrayList<String> unassigned = new ArrayList<String>(); //Stores all currently undefined functions that have been called. All functions share indexes with their relevant value unassignedNums.
+    public static ArrayList<Integer> unassignedNums = new ArrayList<Integer>(); //Stores the line numbers of unassigned functions for use in their error messages if they stay undefined
+    
+    private static int prevpointer = 0;//Stores where the pointer should be after looking ahead for multiplication.
+
+    static private void findDivergence(String curFunc, ArrayList<String> calledFunctions)
+    {//Checks for an infinite loop. Seperated from calculateValue to improve readability.
+        for(int i = 0;i < curFunc.length();i++)
+        {
+            char c = curFunc.charAt(i);
+            if(c >= 65 && c <= 90)//Searches for function calls in the current function string.
+            {
+                String fname = "";
+                c = curFunc.charAt(i);
+                for(;c != '(';i++)//Reads the entirety of the currently called function's name
+                {
+                  fname += c;
+                  c = curFunc.charAt(i+1);
+                }
+                if(calledFunctions.contains(fname))//If the function is already defined in this recursion chain, it would cause an infinite loop and therefore divergence.
+                {
+                  System.out.println("DIVERGENCE");
+                  System.exit(0);
+                }
+                calledFunctions.add(fname);
+                findDivergence(functioncontents.get(functiondefs.indexOf(fname)),calledFunctions); //Checks the function referenced for infinite loops
+                calledFunctions.remove(fname);
+            }
+        }
+    }
+
+    static private int calculateValue(String curFunc, int variableVal, int pointer)
+    {
+        int curVal = 0;
+        int prevNum = 0;
+        for(;pointer<curFunc.length();pointer++)
+        {
+            char c = curFunc.charAt(pointer);
+            if(Character.isDigit(c))
+            {
+              prevNum = c - 48 + prevNum * 10; //If a number is encountered, accounts for subsequent characters also being numbers.
+            }
+            else
+            {
+                if(prevNum != 0)
+                {
+                  curVal = prevNum;
+                  prevNum = 0;
+                }
+                if(c == 'v')
+                {
+                  curVal = variableVal; //Stores the value of this function's parameter
+                }
+                else if(c == '*')
+                {
+                  curVal = curVal * singleStep(curFunc,variableVal,pointer + 1); //Reads the subsequent value in the function to maintain BIDMAS
+                  pointer = prevpointer; //Resumes the function at the point it left off.
+                }
+                else if(c == '+')
+                {
+                  curVal = curVal + calculateValue(curFunc,variableVal,pointer + 1); //Adds the current function value to the value of the remainder of the function.
+                  break; //The remainder of the function will have been executed in the recursive call.
+                }
+                else
+                { //If c is none of the previous characters, it must be a function call.
+                  String fname = "";
+                  String fcontents = "";
+                  c = curFunc.charAt(pointer);
+                  for(;c != '(';pointer++) //Reads the entirety of the function name.
+                  {
+                    fname += c;
+                    c = curFunc.charAt(pointer+1);
+                  }
+                  int bracketcount = 1;
+                  pointer ++;
+                  c = curFunc.charAt(pointer);
+                  for(;bracketcount > 0 ;pointer++) //Reads the entirety of the function body.
+                  {
+                    fcontents += c;
+                    c = curFunc.charAt(pointer+1);
+                    if(c == '(') //If the function call calls another function, it must not end the current call prematurely.
+                    {
+                      bracketcount++;
+                    }
+                    if(c == ')') //The function only ends when the original bracket is matched.
+                    {
+                      bracketcount--;
+                    }
+                  }
+                  curVal = calculateValue(functioncontents.get(functiondefs.indexOf(fname)),calculateValue(fcontents,variableVal,0),0);//Fills in the parameter of the new function and executes it
+                }
+            }
+        }
+        if(prevNum != 0)
+        {
+            curVal = prevNum;
+        }
+        return curVal;
+    }
+
+    static private int singleStep(String curFunc, int variableVal, int pointer)
+    { //Similar to calculateValue, but reads at most one number, variable or function call of the remaining function so that order of operations can be maintained for multiplication.
+      int prevNum = 0;
+      int curVal = 0;
+      for(;pointer<curFunc.length();pointer++)
+        {
+            char c = curFunc.charAt(pointer);
+            if(Character.isDigit(c))
+            {
+              prevNum = c - 48 + prevNum * 10;
+            }
+            else
+            {
+                if(prevNum != 0)
+                {
+                  curVal = prevNum;
+                  pointer--;
+                  prevNum = 0;
+                  break;
+                }
+                if(c == 'v')
+                {
+                  curVal = variableVal;
+                  break;
+                }
+                else
+                {
+                  String fname = "";
+                  String fcontents = "";
+                  c = curFunc.charAt(pointer);
+                  for(;c != '(';pointer++)
+                  {
+                    fname += c;
+                    c = curFunc.charAt(pointer+1);
+                  }
+                  int bracketcount = 1;
+                  pointer ++;
+                  c = curFunc.charAt(pointer);
+                  for(;bracketcount > 0 ;pointer++)
+                  {
+                    fcontents += c;
+                    c = curFunc.charAt(pointer+1);
+                    if(c == '(')
+                    {
+                      bracketcount++;
+                    }
+                    if(c == ')')
+                    {
+                      bracketcount--;
+                    }
+                  }
+                  curVal = calculateValue(functioncontents.get(functiondefs.indexOf(fname)),calculateValue(fcontents,variableVal,0),0);
+                  break;
+                }
+            }
+        }
+        if(prevNum != 0)
+        {
+            curVal = prevNum;
+        }
+        prevpointer = pointer;
+        return curVal;
+    }
+    
+}
+   
+PARSER_END(Assignment)
+
+TOKEN : 
+{
+  <ADD: "+">
+|
+  <MULTIPLY: "*">
+|
+  <MDEF: "DEF MAIN { ">
+|
+  <FDEF: "DEF ">
+|
+  <INTEGER: (["0"-"9"])+>
+|
+  <VARIABLE: (["a"-"z"])+>
+|
+  <FNAME: (["A"-"Z"])+>
+|
+  <SPACE: " ">
+|
+  <OPENBRACE: "{">
+|
+  <CLOSEBRACE: "}">
+|
+  <SEMICOLON: ";">
+|
+  <NEWLINE: ("\r")? "\n"> //Accounts for windows newline
+|
+  <OPENBRACKET: "(">
+|
+  <CLOSEBRACKET: ")">
+|
+  <ANY: (~[])> //Matches any other character to avoid errors.
+}
+
+void functionList() :
+{
+  Token t;
+}
+{//(functionDef()|mainFunction())*<EOF> reads any combination of main and normal function calls. Is not (functionDef())*mainFunction()(functionDef())*<EOF> to avoid default errors.
+    (functionDef()
+    {
+      Expected = "\"DEF \"";//Update the expected next character(s) every time the correct character combination is read
+      linenum += 1; //Increments linenum every time a function definition is successfully read
+    } 
+    | mainFunction() 
+    {
+      Expected = "\"DEF \"";
+      linenum += 1;
+    }
+    )* <EOF>
+    {
+      if(!functiondefs.contains("MAIN"))//Generates error if main is not defined.
+      {
+        System.out.println("FAIL");
+        System.err.println("On line: 0");
+        System.err.println("MAIN function undefined");
+        System.exit(0);
+      }
+      if(unassigned.size() > 0)//Generates error if a function is referenced but never defined.
+      {
+        System.out.println("FAIL");
+        System.err.println("On line: " + unassignedNums.get(0)); //Outputs the earliest undefined function
+        System.err.println("Unassigned function \"" + unassigned.get(0) + "\" referenced");
+        System.exit(0);
+      }
+  }
+}
+
+void mainFunction() :
+{
+  String contents;
+}
+{ //"DEF MAIN ( "functionBody()" } ;\n"  Matches with a correctly defined main function.
+    <MDEF>
+    {
+        if(functiondefs.contains("MAIN"))//Throws an error if MAIN has already been defined.
+        {
+          System.out.println("FAIL");
+          System.err.println("On line: " + linenum);
+          System.err.println("Function MAIN defined twice");
+          System.exit(0);
+        }
+        functiondefs.add("MAIN");
+        Expected = "valid function call, integer or variable";
+        curVar = ""; //Stores no variable as MAIN has none.
+    } 
+    contents = functionBody()
+    {
+        functioncontents.add(contents); //Stores what the main function does
+        Expected = "\" \"";
+    }
+    <SPACE>
+    {
+      Expected = "\"}\"";
+    }
+    <CLOSEBRACE>
+    {
+      Expected = "\" \"";
+    }
+    <SPACE>
+    {
+      Expected = "\";\"";
+    }
+    <SEMICOLON>
+    {
+      Expected = "new line";
+    }
+    <NEWLINE>
+}
+
+void functionDef() :
+{
+   Token t; 
+   Token t2;
+   String contents;
+}
+{//"DEF <FNAME> <VARIABLE> ( "functionBody()" } ;\n"  Matches with a correctly defined function
+    <FDEF>
+    {
+      Expected = "valid function name";
+    }
+    t = <FNAME> 
+    {
+        Expected = "\" \"";
+        if(functiondefs.contains(t.image))
+        {
+          System.out.println("FAIL");
+          System.err.println("On line: " + linenum);
+          System.err.println("Function " + t.image + " defined twice");
+          System.exit(0);
+        }
+        functiondefs.add(t.image);
+        if(unassigned.contains(t.image))
+        {
+            unassignedNums.remove(unassigned.indexOf(t.image));
+            unassigned.remove(t.image);
+        }
+    }
+    <SPACE>
+    {
+        Expected = "valid variable name";
+    } 
+    t2 = <VARIABLE> 
+    { 
+      Expected = "\" \"";
+      curVar = t2.image; //Stores current function variable
+    }
+    <SPACE>
+    {
+      Expected = "\" { \"";
+    }
+    <OPENBRACE> 
+    {
+      Expected = "\" \"";
+    }
+    <SPACE>
+    {
+      Expected = "valid function name, integer or variable";
+    }
+    contents = functionBody() 
+    {
+      functioncontents.add(contents); //Stores what the function does.
+      Expected = "\" \", alternatively \"+\" or \"*\" operator";
+    }
+    <SPACE>
+    {
+      Expected = "\"}\"";
+    }
+    <CLOSEBRACE>
+    {
+      Expected = "\" \"";
+    }
+    <SPACE>
+    {
+      Expected = "\";\"";
+    }
+    <SEMICOLON>
+    {
+      Expected = "new line";
+    }
+    <NEWLINE>
+}
+String functionBody() :
+{
+  Token t;
+  String subcontents;
+  String contents = "";
+}
+{ //functionSegment() ((<ADD>functionSegment())|(<MULTIPLY>functionSegment))* Matches with a function segment, followed by any number of operators and additional segments
+    subcontents = functionSegment()
+    {
+        contents = subcontents; //Adds segment to what function does.
+    }
+    ((t = <ADD> 
+    {
+        Expected = "valid function name, integer or variable";
+    }
+    subcontents = functionSegment()
+    {
+        contents += "+" + subcontents; //Adds operation to what function does.
+    })
+    | (t = <MULTIPLY> 
+    {
+        Expected = "valid function name, integer or variable";
+    }
+    subcontents = functionSegment() //Adds operation to what function does.
+    {
+        contents += "*" + subcontents;
+    })
+    )* 
+    {
+      return contents;
+    }
+}
+
+String functionSegment() :
+{
+  Token t;
+  String contents;
+}
+{ //(functionCall()|<INTEGER>|<VARIABLE>) Matches with a function call, integer or variable
+    (contents = functionCall()
+    {
+        return contents;
+    }
+    | t = <INTEGER>
+    {
+        return t.image;
+    }
+    | t = <VARIABLE>
+    {
+        if(t.image.compareTo(curVar) != 0) //Throws error if the referenced variable does not belong to the current function.
+        {
+          System.out.println("FAIL");
+          System.err.println("On line: " + linenum);
+          System.err.println("Unknown variable \"" + t.image +  "\" referenced. Should be \"" + curVar+"\".");
+          System.exit(0);
+        }
+        return "v"; 
+    }
+    )
+}
+
+String functionCall() :
+{
+  Token t;
+  String contents;
+  String subcontents;
+}
+{//<FNAME>"("functionBody()")" Matches with a correctly formatted function call
+    t = <FNAME>
+    {
+        Expected = "\")\"";
+        if(t.image.compareTo("MAIN") == 0)
+        {
+          System.out.println("FAIL");
+          System.err.println("On line: " + linenum);
+          System.err.println("Attempted to call function MAIN. MAIN is not callable.");
+          System.exit(0);
+        }
+        if(!functiondefs.contains(t.image) && !unassigned.contains(t.image))
+        {
+          unassigned.add(t.image);
+          unassignedNums.add(linenum);
+        }
+        contents = t.image + "(";
+    }
+    <OPENBRACKET> 
+    {
+        Expected = "valid function name, integer or variable";
+    }  
+    subcontents = functionBody()
+    {
+        Expected = "\")\"";
+    }
+     <CLOSEBRACKET>
+    {
+        return contents + subcontents + ")"; //Adds a function call to what the current function does.
+    }
+}
+
+
+
+
+
+
