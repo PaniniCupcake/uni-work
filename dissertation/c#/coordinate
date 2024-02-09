@@ -1,0 +1,109 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+
+public class Coordinate
+{
+    private int x_pos;
+    private int y_pos;
+    public Coordinate(int x, int y)
+    {
+        x_pos = x;
+        y_pos = y;
+    }
+    public int getX()
+    {
+        return x_pos;
+    }
+    public int getY()
+    {
+        return y_pos;
+    }
+    public void setX(int x)
+    {
+        x_pos = x;
+    }
+    public void setY(int y)
+    {
+        y_pos = y;
+    }
+    public Coordinate getUnitVector()
+    {
+        if (x_pos == 0)
+        {
+            return new Coordinate(0, y_pos / Mathf.Abs(y_pos));
+        }
+        else
+        {
+            return new Coordinate(x_pos / Mathf.Abs(x_pos),0);
+        }
+    }
+    public int getDirection(Coordinate other)
+    {
+        int x2 = other.getX();
+        int y2 = other.getY();
+        if (x2 == x_pos)
+        {
+            if (y2 < y_pos)
+            {
+                return 1;
+            }
+            else
+            {
+                return 3;
+            }
+        }
+        else
+        {
+            if (x2 > x_pos)
+            {
+                return 0;
+            }
+            else
+            {
+                return 2;
+            }
+        }
+    }
+    public Coordinate addCoord(Coordinate other)
+    {
+        return new Coordinate(x_pos + other.getX(), y_pos + other.getY());
+    }
+    public Coordinate subtractCoord(Coordinate other)
+    {
+        return new Coordinate(x_pos - other.getX(), y_pos - other.getY());
+    }
+    public Coordinate multiplyCoord(int mul)
+    {
+        return new Coordinate(x_pos * mul, y_pos * mul);
+    }
+    public bool Equals(Coordinate other)
+    {
+        return other.getX() == x_pos && other.getY() == y_pos;
+    }
+
+    public Coordinate rotate(int rotation)//clockwise, 0 is none
+    {
+        if (rotation == 0)
+        {
+            return new Coordinate(x_pos, y_pos);
+        }
+        else if (rotation == 1)
+        {
+            return new Coordinate(y_pos, -x_pos);
+        }
+        else if (rotation == 2)
+        {
+            return new Coordinate(-x_pos, -y_pos);
+        }
+        else
+        {
+            return new Coordinate(-y_pos, x_pos);
+        }
+    }
+    public bool outOfBounds()
+    {
+        return (x_pos > 7 || y_pos > 7 || x_pos < 0 || y_pos < 0);
+    }
+}
