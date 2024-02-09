@@ -1,0 +1,435 @@
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+
+import java.io.IOException;
+import java.util.Properties;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.sql.Timestamp;
+import java.sql.Savepoint;
+import java.util.Vector;
+import java.util.ArrayList;
+public class GigSystem {
+
+    public static void main(String[] args) {
+
+        // You should only need to fetch the connection details once
+        // You might need to change this to either getSocketConnection() or getPortConnection() - see below
+        Connection conn = getSocketConnection();
+
+        boolean repeatMenu = true;
+
+        while(repeatMenu){
+            System.out.println("_________________________");
+            System.out.println("________GigSystem________");
+            System.out.println("_________________________");
+
+            System.out.println("1: Get line up");
+            System.out.println("2: Organise gig");
+            System.out.println("3: Book a ticket");
+            System.out.println("4: Cancel an act");
+            System.out.println("5: Find how many tickets need selling");
+            System.out.println("6: Find out how many tickets were sold");
+            System.out.println("7: Find regular customers");
+            System.out.println("8: Work out economically feasible gigs");
+            System.out.println("q: Quit");
+
+            String menuChoice = readEntry("Please choose an option: ");
+
+            if(menuChoice.length() == 0){
+                //Nothing was typed (user just pressed enter) so start the loop again
+                continue;
+            }
+            char option = menuChoice.charAt(0);
+
+            /**
+             * If you are going to implement a menu, you must read input before you call the actual methods
+             * Do not read input from any of the actual option methods
+             */
+            switch(option){
+                case '1':
+                    while(true)
+                    {
+                        try
+                        {
+                            int gigID = Integer.parseInt(readEntry("Enter the ID of the gig you want the line up for."));
+                            printTable(option1(conn,gigID));
+                            break;
+                        }
+                        catch(NumberFormatException e)
+                        {
+                            System.out.println("Invalid integer");
+                        }//Make sure a valid int is entered
+                    }
+                    break;
+
+                case '2':
+                    break;
+                case '3':
+
+                    break;
+                case '4':
+
+                    break;
+                case '5':
+                    printTable(option5(conn));
+                    break;
+                case '6':
+                    printTable(option6(conn));
+                    break;
+                case '7':
+                    printTable(option7(conn));
+                    break;
+                case '8':
+                    printTable(option8(conn));
+                    break;
+                case 'q':
+                    repeatMenu = false;
+                    break;
+                default:
+                    System.out.println("Invalid option");
+            }
+        }
+    }
+
+
+    public static String[][] option1(Connection conn, int gigID){
+        String selectQuery = "SELECT actname, ontime::time, (ontime::time + interval '1 minute' * duration) FROM (Act NATURAL JOIN Act_gig) WHERE gigID = ? ORDER BY act_gig.ontime";
+        try{
+            PreparedStatement preparedStatement = conn.prepareStatement(selectQuery);
+            preparedStatement.setInt(1, gigID);
+            ResultSet actTimes = preparedStatement.executeQuery();
+            return convertResultToStrings(actTimes);
+        }catch(SQLException e){
+            System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+            e.printStackTrace();
+        }
+        return new String[0][0];
+    }
+
+    public static void option2(Connection conn, String venue, String gigTitle, int[] actIDs, int[] fees, LocalDateTime[] onTimes, int[] durations, int adultTicketPrice){
+        String selectVenue = "SELECT venueID from Venue WHERE venuename = ?";
+        Savepoint backup = null;
+        try{
+            backup = conn.setSavepoint();
+            conn.setAutoCommit(false);
+            PreparedStatement venueStatement = conn.prepareStatement(selectVenue);
+            venueStatement.setString(1,venue);
+            ResultSet venuetime = venueStatement.executeQuery();
+            venuetime.next();
+            String insert = "INSERT NULL,?,?,?,'GoingAhead' INTO Gig";
+            PreparedStatement preparedStatement = conn.prepareStatement(insert);
+            preparedStatement.setInt(1, venuetime.getInt(1));
+            preparedStatement.setString(2, gigTitle);
+            preparedStatement.setTimestamp(3, Timestamp.valueOf(onTimes[0]));
+            preparedStatement.executeUpdate();
+            String selectGigId = "SELECT GigID from GIG WHERE Venue = ? AND ontime = ?";//Find the id of gig we just inserted. This combination of venue and ontime is guaranteed to exist as we just added it.
+            PreparedStatement gigStatement = conn.prepareStatement(selectGigId);
+            gigStatement.setString(1,venue);
+            gigStatement.setTimestamp(2,Timestamp.valueOf(onTimes[0]));
+            ResultSet gigIdset = gigStatement.executeQuery();
+            gigIdset.next();
+            int gigID = gigIdset.getInt(1);
+            insert = "INSERT ?,?,?,?,? INTO Act_gig";
+            for(int i = 0;i<actIDs.length;i++)//Insert every different act to the gig
+            {
+                preparedStatement = conn.prepareStatement(insert);
+                preparedStatement.setInt(1,actIDs[i]);
+                preparedStatement.setInt(2,gigID);
+                preparedStatement.setInt(3,fees[i]);
+                preparedStatement.setTimestamp(4,Timestamp.valueOf(onTimes[i]));
+                preparedStatement.setInt(5,durations[i]);
+                preparedStatement.addBatch();
+            }
+            preparedStatement.executeBatch();
+            insert = "INSERT ?,'A',? INTO Gig_ticket";//Insert the default ticket price
+            preparedStatement = conn.prepareStatement(insert);
+            preparedStatement.setInt(1, gigID);
+            preparedStatement.setInt(2, adultTicketPrice);
+            preparedStatement.executeUpdate();
+            conn.setAutoCommit(true);
+          }catch(SQLException e){
+            try {conn.rollback(backup);}
+            catch(SQLException e2){
+              System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e2.getMessage());
+              e.printStackTrace();
+            }
+            System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+            e.printStackTrace();
+          }
+    }
+
+    public static void option3(Connection conn, int gigid, String name, String email, String ticketType){
+      String selectCost = "SELECT cost from Gig_ticket WHERE gigID = ? AND priceType = ?";
+      Savepoint backup = null;
+      try{
+          backup = conn.setSavepoint();
+          PreparedStatement costStatement = conn.prepareStatement(selectCost);
+          costStatement.setInt(1,gigid);
+          costStatement.setString(2,ticketType);
+          ResultSet costSet = costStatement.executeQuery();
+          if(costSet.next())
+          {
+            String insert = "INSERT NULL,?,?,?,?,? INTO Ticket";
+            PreparedStatement preparedStatement = conn.prepareStatement(insert);
+            preparedStatement.setInt(1, gigid);//Set all the variables
+            preparedStatement.setString(2, ticketType);
+            preparedStatement.setInt(3, costSet.getInt(1));
+            preparedStatement.setString(4, name);
+            preparedStatement.setString(5, email);
+            preparedStatement.executeUpdate();
+          }
+
+        }catch(SQLException e){
+          try {conn.rollback(backup);}
+          catch(SQLException e2){
+            System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e2.getMessage());
+            e.printStackTrace();
+          }
+          System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+          e.printStackTrace();
+        }
+    }
+
+    public static String[] option4(Connection conn, int gigID, String actName){
+      String selectAct = "SELECT actID from Act WHERE actID = ?";
+      Savepoint backup = null;
+      try{
+          backup = conn.setSavepoint();
+          PreparedStatement actStatement = conn.prepareStatement(selectAct);
+          actStatement.setString(1,actName);
+          ResultSet actSet = actStatement.executeQuery();
+          if(actSet.next())
+          {
+            String del = "DELETE FROM Act_gig WHERE gigID = ? AND actID = ?";
+            PreparedStatement preparedStatement = conn.prepareStatement(del);
+            preparedStatement.setInt(1, gigID);
+            preparedStatement.setInt(2, actSet.getInt(1));
+            preparedStatement.executeUpdate();
+          }
+
+        }catch(SQLException e){
+          try {file:///dcs/20/u2007930/cs258labs/Cw/src/main/java/GigSystem.java
+            String cance = "SELECT CustomerEmail FROM (Gig NATURAL JOIN Ticket) WHERE gigStatus = 'Cancelled' AND gigID = ?";
+            PreparedStatement canceStatement = conn.prepareStatement(cance);
+            ResultSet canceSet = canceStatement.executeQuery();
+            if(canceSet.next())//Check if the gigstatus was cancelled
+            {
+                String mails = "SELECT CustomerEmail FROM (Gig NATURAL JOIN Ticket) WHERE gigStatus = 'Cancelled' AND gigID = ?";
+                PreparedStatement mailStatement = conn.prepareStatement(mails);
+                mailStatement.setInt(1,gigID);
+                ResultSet mailSet = mailStatement.executeQuery();
+                ArrayList<String> emails = new ArrayList<String>();
+                while (mailSet.next())//Loop through emails of cancelled gig
+                {
+                    emails.add(mailSet.getString(1));
+                }
+                String[] mailArray = new String[emails.size()];
+                for(int i = 0; i < emails.size();i++)
+                {
+                    mailArray[i] = emails.get(i);
+                }
+                return mailArray;
+            }
+            conn.rollback(backup);
+          }
+          catch(SQLException e2){
+            System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e2.getMessage());
+            e.printStackTrace();
+          }
+          System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+          e.printStackTrace();
+        }
+        return null;
+    }
+
+    public static String[][] option5(Connection conn){//All subsequent queries are done in sql entirely
+      String venueQuery = "SELECT gigID, CEILING((venueticket.hirecost + actfees.acttotal - venueticket.sold) / venueticket.cost)  FROM ((SELECT gigID, hirecost FROM (Gig NATURAL JOIN Venue)) as h NATURAL JOIN (SELECT Gig_ticket.gigID, Gig_ticket.cost, COALESCE(SUM(Ticket.cost),0) as sold FROM (Gig_ticket LEFT JOIN Ticket ON Gig_ticket.GigID = Ticket.GigID) GROUP BY Gig_ticket.gigID, Gig_ticket.cost) as f)as venueticket NATURAL JOIN (SELECT gigID, SUM(actfee) acttotal FROM Act_gig GROUP BY gigID) as actfees ORDER BY gigID";
+      try{
+          PreparedStatement venueStatement = conn.prepareStatement(venueQuery);
+          ResultSet venueSet = venueStatement.executeQuery();
+          return convertResultToStrings(venueSet);
+      }catch(SQLException e){
+          System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+          e.printStackTrace();
+      }
+      return new String[0][0];
+    }
+
+
+
+    public static String[][] option6(Connection conn){
+        String headlineView = "CREATE OR REPLACE VIEW headliners AS(SELECT ag.gigID, ag.actID, ontime FROM (Act_gig ag JOIN (SELECT gigId,MAX(ontime) latest FROM Act_gig GROUP BY gigID) sag ON ag.gigid = sag.gigid AND ag.ontime = sag.latest))";
+        String ticketView = "CREATE OR REPLACE VIEW actTickets as (SELECT actname, EXTRACT(year FROM ontime) onyear, ticketid FROM ((SELECT * FROM (headliners NATURAL JOIN Act) NATURAL JOIN Gig WHERE gigstatus = 'GoingAhead') as x NATURAL JOIN Ticket))";
+        String actQuery = "SELECT * FROM (SELECT actname,COALESCE(onyear :: text,'Total'),COUNT(ticketid) FROM ((SELECT actname,COUNT(ticketid) tota FROM actTickets GROUP BY actname) as x NATURAL JOIN actTickets) GROUP BY ROLLUP(actname,onyear) ORDER BY (AVG(tota),actname,onyear)) as nothin WHERE actname != 'NoName'";
+
+        try{
+            PreparedStatement viewStatement = conn.prepareStatement(headlineView);
+            viewStatement.executeUpdate();
+            PreparedStatement viewStatement2 = conn.prepareStatement(ticketView);
+            viewStatement2.executeUpdate();
+            PreparedStatement actStatement = conn.prepareStatement(actQuery);
+            ResultSet actSet = actStatement.executeQuery();;
+            return convertResultToStrings(actSet);
+        }catch(SQLException e){
+            System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+            e.printStackTrace();
+        }
+        return new String[0][0];
+    }
+
+    public static String[][] option7(Connection conn){
+      String headlineView = "CREATE OR REPLACE VIEW headliners AS(SELECT ag.gigID, ag.actID, ontime FROM (Act_gig ag JOIN (SELECT gigId,MAX(ontime) latest FROM Act_gig GROUP BY gigID) sag ON ag.gigid = sag.gigid AND ag.ontime = sag.latest))";
+      String actQuery = "SELECT Act.actname, regulars.reg FROM Act NATURAL JOIN (SELECT acts.actid, COALESCE(tickets.customername,'[None]') reg FROM (SELECT COUNT(DISTINCT(actid,EXTRACT(year FROM ontime))) datecount,actid FROM headliners GROUP BY actid) acts LEFT JOIN (SELECT COUNT(DISTINCT(actID,EXTRACT(year FROM ontime))) actcount, customername,actID FROM (headliners NATURAL JOIN Ticket) GROUP BY customername,actid) tickets ON acts.datecount = tickets.actcount AND acts.actid = tickets.actID) regulars ORDER BY Act.actname, regulars.reg;";
+      try{
+          PreparedStatement viewStatement = conn.prepareStatement(headlineView);
+          viewStatement.executeUpdate();
+          PreparedStatement actStatement = conn.prepareStatement(actQuery);
+          ResultSet actSet = actStatement.executeQuery();;
+          return convertResultToStrings(actSet);
+      }catch(SQLException e){
+          System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+          e.printStackTrace();
+      }
+      return new String[0][0];
+    }
+
+    public static String[][] option8(Connection conn){
+      String avgView = "CREATE OR REPLACE VIEW ticketAverage AS (SELECT avg(cost) FROM ticket NATURAL JOIN gig WHERE gig.gigstatus='GoingAhead')";
+      //String actQuery = "SELECT venuename,actname, needed::integer FROM (SELECT venuename,actname, capacity, (standardfee+hirecost)/(ticketAverage)) AS needed FROM act CROSS JOIN venue) AS x WHERE capacity >= needed ORDER BY venuename, (needed/capacity) DESC";
+      String actQuery = "SELECT venuename,actname, needed::integer FROM (SELECT venuename,actname, capacity, CEILING((standardfee+hirecost)/(SELECT avg FROM ticketAverage)) AS needed FROM act CROSS JOIN venue) AS x WHERE capacity >= needed ORDER BY venuename, (needed/capacity) DESC";
+      try{
+          PreparedStatement viewStatement = conn.prepareStatement(avgView);
+          viewStatement.executeUpdate();
+          PreparedStatement actStatement = conn.prepareStatement(actQuery);
+          ResultSet actSet = actStatement.executeQuery();
+          return convertResultToStrings(actSet);
+      }catch(SQLException e){
+          System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+          e.printStackTrace();
+      }
+      return new String[0][0];
+    }
+
+    /**
+     * Prompts the user for input
+     * @param prompt Prompt for user input
+     * @return the text the user typed
+     */
+
+    private static String readEntry(String prompt) {
+
+        try {
+            StringBuffer buffer = new StringBuffer();
+            System.out.print(prompt);
+            System.out.flush();
+            int c = System.in.read();
+            while(c != '\n' && c != -1) {
+                buffer.append((char)c);
+                c = System.in.read();
+            }
+            return buffer.toString().trim();
+        } catch (IOException e) {
+            return "";
+        }
+
+    }
+
+    /**
+    * Gets the connection to the database using the Postgres driver, connecting via unix sockets
+    * @return A JDBC Connection object
+    */
+    public static Connection getSocketConnection(){
+        Properties props = new Properties();
+        props.setProperty("socketFactory", "org.newsclub.net.unix.AFUNIXSocketFactory$FactoryArg");
+        props.setProperty("socketFactoryArg",System.getenv("HOME") + "/cs258-postgres/postgres/tmp/.s.PGSQL.5432");
+        Connection conn;
+        try{
+          conn = DriverManager.getConnection("jdbc:postgresql://localhost/cwk", props);
+          return conn;
+        }catch(Exception e){
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    /**
+     * Gets the connection to the database using the Postgres driver, connecting via TCP/IP port
+     * @return A JDBC Connection object
+     */
+    public static Connection getPortConnection() {
+
+        String user = "postgres";
+        String passwrd = "password";
+        Connection conn;
+
+        try {
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException x) {
+            System.out.println("Driver could not be loaded");
+        }
+
+        try {
+            conn = DriverManager.getConnection("jdbc:postgresql://127.0.0.1:5432/cwk?user="+ user +"&password=" + passwrd);
+            return conn;
+        } catch(SQLException e) {
+            System.err.format("SQL State: %s\n%s\n", e.getSQLState(), e.getMessage());
+            e.printStackTrace();
+            System.out.println("Error retrieving connection");
+            return null;
+        }
+    }
+
+    public static String[][] convertResultToStrings(ResultSet rs){
+        Vector<String[]> output = null;
+        String[][] out = null;
+        try {
+            int columns = rs.getMetaData().getColumnCount();
+            output = new Vector<String[]>();
+            int rows = 0;
+            while(rs.next()){
+                String[] thisRow = new String[columns];
+                for(int i = 0; i < columns; i++){
+                    thisRow[i] = rs.getString(i+1);
+                }
+                output.add(thisRow);
+                rows++;
+            }
+            // System.out.println(rows + " rows and " + columns + " columns");
+            out = new String[rows][columns];
+            for(int i = 0; i < rows; i++){
+                out[i] = output.get(i);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return out;
+    }
+
+    public static void printTable(String[][] out){
+        int numCols = out[0].length;
+        int w = 20;
+        int widths[] = new int[numCols];
+        for(int i = 0; i < numCols; i++){
+            widths[i] = w;
+        }
+        printTable(out,widths);
+    }
+
+    public static void printTable(String[][] out, int[] widths){
+        for(int i = 0; i < out.length; i++){
+            for(int j = 0; j < out[i].length; j++){
+                System.out.format("%"+widths[j]+"s",out[i][j]);
+                if(j < out[i].length - 1){
+                    System.out.print(",");
+                }
+            }
+            System.out.println();
+        }
+    }
+
+}
